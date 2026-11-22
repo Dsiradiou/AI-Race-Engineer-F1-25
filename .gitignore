@@ -16,3 +16,6 @@ logs/*
 .idea/
 Thumbs.db
 .DS_Store
+
+# Spec officielle EA (© EA, gardée en local uniquement)
+docs/specs/

@@ -8,6 +8,8 @@ Référence complète : `AI_RACE_ENGINEER.md`.
 
 **Légende :** `[ ]` à faire · `[~]` en cours · `[x]` terminé (validé + commité)
 
+**Modes de jeu visés :** course (Grand Prix) **et Contre-la-montre** (*Time Trial*) — ajout décidé à l'étape 1.1. Les étapes marquées ⏱️ concernent spécifiquement le Contre-la-montre.
+
 ## Objectif pédagogique
 
 Au-delà du logiciel, ce projet sert à **comprendre comment fonctionne un modèle d'IA**,
@@ -29,25 +31,27 @@ tirés du projet lors des bilans (section « Concepts IA » de `RECAPITULATIFS.m
 
 ## Phase 1 — Télémétrie UDP
 
-- [~] 1.1 Vérifier la spec officielle des paquets UDP F1 25 (en-tête, IDs de paquets, tailles)
-- [ ] 1.2 `telemetry/udp_receiver.py` — réception des paquets UDP (port 20777)
+- [x] 1.1 Vérifier la spec officielle des paquets UDP F1 25 (en-tête, IDs de paquets, tailles, paquet Session et paquet TimeTrial)
+- [~] 1.2 `telemetry/udp_receiver.py` — réception des paquets UDP (port 20777)
 - [ ] 1.3 `telemetry/packet_parser.py` — décodage binaire (`struct`) des paquets utiles + tests
 - [ ] 1.4 `telemetry/snapshot.py` — `TelemetrySnapshot` (état courant de la course)
+- [ ] 1.4b ⏱️ Type de session (paquet Session) dans le snapshot + données du paquet TimeTrial (meilleur tour perso, rival) si présent dans le format 2025
 - [ ] 1.5 Affichage console en temps réel (vitesse, tour, secteur, pneus, gap)
 - [ ] 1.6 `tools/record_session.py` — enregistrement des paquets bruts
 - [ ] 1.7 `tools/replay_session.py` — rejeu d'une session enregistrée
-- [ ] 1.8 **Validation :** session réelle F1 25 affichée en console + rejeu identique
+- [ ] 1.8 **Validation :** session réelle F1 25 (Contre-la-montre **et** course) affichée en console + rejeu identique
 
 > **Concepts IA :** pipeline de données (données brutes → données structurées), format binaire et sérialisation, flux temps réel vs batch, extraction de caractéristiques (*features*), qualité des données et reproductibilité (rejeu).
 
 ## Phase 2 — Analyzer MoE
 
-- [ ] 2.1 `analyzer/router.py` — `TelemetryRouter` + tests
+- [ ] 2.1 `analyzer/router.py` — `TelemetryRouter` + tests, **routage selon le type de session** (en Contre-la-montre : pas d'expert Strategy)
 - [ ] 2.2 `analyzer/expert_pace.py` + tests
+- [ ] 2.2b ⏱️ Pace en Contre-la-montre : delta en direct vs meilleur tour perso (trace du meilleur tour), pertes par secteur, tour invalidé + tests
 - [ ] 2.3 `analyzer/expert_strategy.py` + tests
 - [ ] 2.4 `analyzer/expert_meca.py` + tests
 - [ ] 2.5 `analyzer/aggregator.py` — fusion et priorisation des alertes + tests
-- [ ] 2.6 **Validation :** `pytest` vert + alertes visibles en console sur une session rejouée
+- [ ] 2.6 **Validation :** `pytest` vert + alertes visibles en console sur une session rejouée (une course et un Contre-la-montre)
 
 > **Concepts IA :** Mixture of Experts — router (*gating*), experts, activation top-k, paramètres totaux vs actifs ; **MoE applicatif (ce projet) vs MoE neuronal (Mixtral)** ; systèmes à règles vs modèles appris ; tests d'un système de décision.
 

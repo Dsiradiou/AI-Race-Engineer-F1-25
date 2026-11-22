@@ -12,6 +12,7 @@ Elles sont ajoutées dans l'ordre chronologique, sous l'étape où elles ont ét
 | Q3 | 0.3 | Paramètres vs hyperparamètres |
 | Q4 | 0.3 | Paramètres et hyperparamètres d'un MoE |
 | Q5 | 0.4 | Entraînement vs inférence : coût mémoire |
+| Q6 | 1.1 | Décoder avec le mauvais schéma |
 
 ---
 
@@ -228,3 +229,49 @@ Comparé aux ~5 Go de l'inférence en Q4 : **environ 25 à 30 fois plus de mémo
 - Entraîner = poids **+ gradients + états de l'optimiseur + activations**, en précision élevée : ~16 octets par paramètre au lieu de ~0,6 en inférence Q4.
 - Le **gradient** indique, pour chaque paramètre, dans quel sens le modifier pour réduire l'erreur ; la **rétropropagation** le calcule en remontant le réseau.
 - Pour adapter un gros modèle avec peu de mémoire : **LoRA / QLoRA** (on n'entraîne qu'une toute petite partie).
+
+---
+
+## Q6 — Que se passe-t-il si on décode avec le mauvais schéma ?
+
+*Contexte : étape 1.1 — F1 25 a deux modes UDP dont les paquets n'ont pas le même contenu (2026-11-22).*
+
+### Question
+
+Imaginons que le jeu envoie des paquets `LapData` au format « 2026 Season Pack » (24 voitures), mais que notre parser les décode avec la structure du mode « F1 25 » (22 voitures, champs dans un autre ordre ou de tailles différentes).
+1. Est-ce que Python va forcément lever une erreur ?
+2. Quel genre de valeurs verrait-on dans la console, et pourquoi est-ce plus dangereux qu'un plantage ?
+3. Quelle vérification simple, faite avant de décoder, permettrait d'éviter le problème ?
+
+### Ta réponse
+
+> Python ne lèvera pas forcément d'erreur, les valeurs seraient fausses. Avant de décoder, on pourrait vérifier l'en-tête du paquet.
+
+### Correction — juste, avec deux précisions
+
+**1. Pas forcément d'erreur — ça dépend de la fonction utilisée.**
+- `struct.unpack(format, data)` exige que `data` ait **exactement** la taille du format : sinon il lève `struct.error`. Là, on a de la chance, ça plante.
+- `struct.unpack_from(format, data, offset)` lit seulement les octets dont il a besoin, à partir de `offset`, et ignore le reste. C'est ce qu'on utilise pour lire la voiture n°5 d'un tableau de 22. Si le paquet est plus long que prévu : **aucune erreur**, juste des octets lus au mauvais endroit.
+
+**2. Des valeurs fausses… qui peuvent avoir l'air vraies.**
+Si un champ a changé de taille au début de la structure, tous les champs suivants sont **décalés**. On lit alors les octets du champ voisin :
+- parfois c'est absurde (`position = 187`, `temps au tour = 4 294 967 ms`) → on s'en rend compte ;
+- parfois c'est **plausible** (une vitesse de 212 km/h qui est en fait un autre champ) → personne ne s'en rend compte.
+
+C'est le vrai danger : l'erreur est **silencieuse** et se propage. L'expert Pace déclenche une alerte sur une fausse perte de temps, le LLM la formule avec assurance, et le TTS dit au pilote « *you're losing 3 tenths in sector 2* » alors que c'est faux. Un plantage, au moins, se voit tout de suite.
+
+**3. Vérifier l'en-tête : oui — mais ça ne suffit pas toujours.**
+On vérifie dans l'en-tête :
+- `m_packetFormat == 2025` → c'est bien le format qu'on sait lire ;
+- `m_packetId` connu → on sait quelle structure appliquer.
+
+Mais l'en-tête peut dire la vérité et le contenu avoir quand même changé : on l'a vu à l'étape 1.1, **dans le même format F1 25**, le paquet CarDamage est passé de 953 à 1041 octets entre deux versions de la spec. D'où une **deuxième vérification**, complémentaire :
+- `len(data) == taille_attendue[packet_id]` → le contenu a bien la forme qu'on croit.
+
+L'en-tête dit **ce que le paquet prétend être** ; la taille vérifie **qu'il l'est vraiment**. Si l'un des deux ne correspond pas : on rejette le paquet et on l'écrit dans les logs, plutôt que de deviner.
+
+### À retenir
+
+- Mauvais schéma = valeurs fausses, souvent **sans erreur** : c'est pire qu'un plantage, car ça se propage jusqu'au pilote.
+- Valider avant de décoder : **format + ID** (en-tête) **et taille** (contenu).
+- Principe général en IA et en données : *garbage in, garbage out* — un modèle ne peut pas corriger des données d'entrée fausses ; il les transforme en réponses fausses mais convaincantes.
