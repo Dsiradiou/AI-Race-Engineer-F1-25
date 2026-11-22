@@ -21,7 +21,7 @@ tirés du projet lors des bilans (section « Concepts IA » de `RECAPITULATIFS.m
 ## Étape 0 — Mise en place
 
 - [x] 0.1 Créer le dépôt GitHub et le lier au dossier local
-- [ ] 0.2 Choisir et installer la version de Python (3.12 recommandé), créer le venv
+- [x] 0.2 Choisir et installer la version de Python (3.12 recommandé), créer le venv
 - [ ] 0.3 Créer l'arborescence du projet (`__init__.py`, `requirements.txt`, `.gitignore`, `.env.example`, `config.py`)
 - [ ] 0.4 Écrire un `README.md` minimal (objectif, architecture, installation)
 
