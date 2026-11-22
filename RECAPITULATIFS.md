@@ -63,3 +63,15 @@ y sont expliqués avec des exemples concrets tirés du projet.
 - **Points ouverts :** aucun.
 - **Suite proposée :** étape 0.4 — `README.md` minimal (objectif, architecture, installation).
 - **Statut :** validé et commité.
+
+### Étape 0.4 — README minimal (2026-11-22)
+
+- **Fait :** `README.md` réécrit : présentation, statut, schéma d'architecture (Mermaid, rendu automatiquement par GitHub), tableau MoE applicatif vs neuronal, stack, budget mémoire, installation Windows, configuration de F1 25, lancement des tests, structure, liens vers les fichiers de suivi, limites connues. Rédigé en français, comme le reste du projet.
+- **Tests :** liens internes du README vérifiés (fichiers existants) ; `pytest` → 4 passed. Le rendu du schéma Mermaid se vérifie sur GitHub après le push.
+- **Concepts IA :**
+  - **Entraînement vs inférence.** Un modèle d'IA a deux vies. **L'entraînement** : on lui montre d'énormes quantités de données et on ajuste ses paramètres (Q3) — c'est long, coûteux, fait une seule fois par Meta pour Llama. **L'inférence** : on utilise le modèle figé pour produire une réponse — c'est ce que fera notre projet à chaque message radio. Le README le dit implicitement : « tout tourne en local » ne concerne que l'inférence ; nous n'entraînerons aucun des modèles utilisés (Llama, Whisper).
+  - **Documenter un système d'IA.** Un projet d'IA sérieux documente ses choix de modèles, ses contraintes de ressources et ses limites (c'est l'idée des *model cards* publiées avec les modèles). Le tableau du budget mémoire et la section « Limites connues » du README jouent ce rôle ; on y ajoutera les mesures de latence et de RAM/VRAM des phases 4 à 6.
+  - **Question de vérification :** Q5 dans `QUESTIONS_PEDAGOGIQUES.md`.
+- **Points ouverts :** README en français ; une version anglaise pourra être ajoutée en Phase 7 si le projet doit viser des recruteurs internationaux.
+- **Suite proposée :** Phase 1, étape 1.1 — vérifier la spec officielle des paquets UDP F1 25.
+- **Statut :** validé et commité.

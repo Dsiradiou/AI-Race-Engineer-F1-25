@@ -23,13 +23,13 @@ tirés du projet lors des bilans (section « Concepts IA » de `RECAPITULATIFS.m
 - [x] 0.1 Créer le dépôt GitHub et le lier au dossier local
 - [x] 0.2 Choisir et installer la version de Python (3.12 recommandé), créer le venv
 - [x] 0.3 Créer l'arborescence du projet (`__init__.py`, `requirements.txt`, `.gitignore`, `.env.example`, `config.py`)
-- [~] 0.4 Écrire un `README.md` minimal (objectif, architecture, installation)
+- [x] 0.4 Écrire un `README.md` minimal (objectif, architecture, installation)
 
 > **Concepts IA :** pourquoi l'IA tourne sur GPU (calcul matriciel parallèle), CPU vs GPU, VRAM vs RAM, CUDA, gestion des dépendances.
 
 ## Phase 1 — Télémétrie UDP
 
-- [ ] 1.1 Vérifier la spec officielle des paquets UDP F1 25 (en-tête, IDs de paquets, tailles)
+- [~] 1.1 Vérifier la spec officielle des paquets UDP F1 25 (en-tête, IDs de paquets, tailles)
 - [ ] 1.2 `telemetry/udp_receiver.py` — réception des paquets UDP (port 20777)
 - [ ] 1.3 `telemetry/packet_parser.py` — décodage binaire (`struct`) des paquets utiles + tests
 - [ ] 1.4 `telemetry/snapshot.py` — `TelemetrySnapshot` (état courant de la course)

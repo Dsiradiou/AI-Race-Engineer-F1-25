@@ -11,6 +11,7 @@ Elles sont ajoutées dans l'ordre chronologique, sous l'étape où elles ont ét
 | Q2 | 0.2 | Poids en RAM vs VRAM : vitesse de génération |
 | Q3 | 0.3 | Paramètres vs hyperparamètres |
 | Q4 | 0.3 | Paramètres et hyperparamètres d'un MoE |
+| Q5 | 0.4 | Entraînement vs inférence : coût mémoire |
 
 ---
 
@@ -172,3 +173,58 @@ Dans Mixtral 8x7B, classe ces trois éléments en **paramètre** ou **hyperparam
 | **Hyperparamètre** | L'humain, avant | top-2, 8 experts, 32 couches | modèle Ollama, cooldown 15 s |
 | **Paramètre** | L'entraînement | poids du router et des experts | *(aucun : tout est réglé à la main)* |
 | **Activation** | Le calcul, à chaque entrée | experts choisis pour « *tyres* » | experts activés pour un snapshot |
+
+---
+
+## Q5 — Pourquoi peut-on utiliser Llama 8B, mais pas l'entraîner ?
+
+*Contexte : étape 0.4 — README, entraînement vs inférence (2026-11-22).*
+
+### Question
+
+En inférence, Llama 3.1 8B quantifié tient dans ~5 Go de VRAM sur ta machine. Pourtant, il serait impossible de l'**entraîner** (même seulement le réentraîner un peu) sur cette même machine. D'après toi, qu'est-ce que l'entraînement doit garder en mémoire **en plus** des poids eux-mêmes ? (Indice : repense à l'exemple de Q3 — à chaque époque, l'algorithme « ajuste `w` et `b` pour se tromper un peu moins ». Que lui faut-il pour savoir dans quel sens les ajuster ?)
+
+### Ta réponse
+
+> Il lui faudrait retenir aussi les paramètres et hyperparamètres.
+
+### Correction — pas tout à fait
+
+- **Les paramètres**, ce sont justement les poids : ils sont déjà comptés dans les ~5 Go. Ce n'est pas un « en plus ».
+- **Les hyperparamètres** sont une poignée de nombres (nombre d'époques, taux d'apprentissage…) : quelques octets, négligeable.
+
+Ce qui manque, c'est la réponse à l'indice : **pour savoir dans quel sens ajuster `w`, il faut un gradient.**
+
+**1. Les gradients — un par paramètre.**
+Dans l'exemple de Q3, le gradient de `w` répond à la question : « si j'augmente un tout petit peu `w`, l'erreur augmente-t-elle ou diminue-t-elle, et de combien ? ». Si l'erreur diminue quand `w` augmente, on augmente `w`. Avec 2 paramètres (`w`, `b`), il faut 2 gradients. Avec Llama : **8 milliards de gradients**, autant que de poids.
+
+**2. Les états de l'optimiseur — deux valeurs par paramètre.**
+L'optimiseur le plus utilisé (Adam) ne suit pas le gradient bêtement : il garde pour chaque poids une **moyenne des gradients passés** (l'élan, pour ne pas zigzaguer) et une **moyenne de leurs carrés** (pour adapter la taille du pas). Encore 2 × 8 milliards de valeurs.
+
+**3. Les activations — les résultats intermédiaires.**
+Le calcul du gradient (la *rétropropagation*, *backpropagation*) remonte le réseau de la dernière couche à la première. Pour ça, il a besoin des résultats calculés par chaque couche lors du passage « aller ». Il faut donc les garder en mémoire, pour chaque token du texte d'entraînement. En inférence, on les jette au fur et à mesure.
+
+**4. Une précision plus élevée.**
+On ne peut pas entraîner directement en 4 bits : les petites corrections se perdraient dans l'arrondi. L'entraînement se fait en 16 ou 32 bits.
+
+**Le bilan pour Llama 3.1 8B** (entraînement complet, précision mixte, Adam) :
+
+| Élément | Octets par paramètre | Total pour 8 B |
+|---|---|---|
+| Poids (bf16) | 2 | 16 Go |
+| Gradients (bf16) | 2 | 16 Go |
+| Copie des poids en fp32 | 4 | 32 Go |
+| Adam : moyenne des gradients | 4 | 32 Go |
+| Adam : moyenne des carrés | 4 | 32 Go |
+| **Sous-total** | **16** | **~128 Go** |
+| + activations | variable | plusieurs dizaines de Go |
+
+Comparé aux ~5 Go de l'inférence en Q4 : **environ 25 à 30 fois plus de mémoire.**
+
+**Une correction de ma question :** j'ai écrit « même seulement le réentraîner un peu », c'est trop fort. Il existe une technique, **QLoRA**, qui gèle les poids d'origine (gardés en 4 bits) et n'entraîne que de petites matrices ajoutées (~0,1 à 1 % des paramètres). Gradients et états d'Adam ne concernent alors que ces petites matrices. Pour un 8B, ça reste juste sur 8 Go de VRAM, mais c'est faisable avec des outils optimisés. Un entraînement **complet**, lui, est hors de portée.
+
+### À retenir
+
+- Entraîner = poids **+ gradients + états de l'optimiseur + activations**, en précision élevée : ~16 octets par paramètre au lieu de ~0,6 en inférence Q4.
+- Le **gradient** indique, pour chaque paramètre, dans quel sens le modifier pour réduire l'erreur ; la **rétropropagation** le calcule en remontant le réseau.
+- Pour adapter un gros modèle avec peu de mémoire : **LoRA / QLoRA** (on n'entraîne qu'une toute petite partie).
