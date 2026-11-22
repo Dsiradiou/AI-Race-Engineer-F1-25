@@ -44,3 +44,22 @@ y sont expliqués avec des exemples concrets tirés du projet.
 - **Points ouverts :** `.venv/` apparaît comme non suivi dans Git → il sera ignoré par le `.gitignore` de l'étape 0.3.
 - **Suite proposée :** étape 0.3 — arborescence du projet, `.gitignore`, `requirements.txt`, `.env.example`, `config.py`.
 - **Statut :** validé et commité.
+
+### Étape 0.3 — Arborescence, configuration et dépendances (2026-11-22)
+
+- **Fait :**
+  - Paquets `telemetry/`, `analyzer/`, `voice/`, `ai/`, `tools/` avec un `__init__.py` qui documente leur rôle (aucun module vide « pour plus tard ») ; dossiers `tests/fixtures/` et `logs/` (gardés via `.gitkeep`).
+  - `.gitignore` : `.venv/`, caches Python, `.env`, contenu de `logs/`.
+  - `.env.example` : port UDP, URL et modèle Ollama, modèle Whisper, clé ElevenLabs (vide).
+  - `config.py` : `Settings` (lus depuis `.env`, avec valeurs par défaut) + `Thresholds` (seuils de la section 6, non modifiables à l'exécution). Seul choix ajouté : palier d'usure « critique » fixé à 90 % (non précisé dans le cadrage, à affiner en Phase 7).
+  - `requirements.txt` minimal (versions figées) : `python-dotenv`, `pytest`. Les autres bibliothèques seront ajoutées dans la phase qui les utilise.
+  - `pyproject.toml` : métadonnées du projet + configuration de pytest.
+- **Tests :** `pytest -v` → **4 passed** (`tests/test_config.py` : valeurs par défaut, surcharge par variables d'environnement, seuils, immutabilité). `.venv/` n'apparaît plus dans `git status`.
+- **Concepts IA :**
+  - **Paramètres réglés à la main vs paramètres appris.** Nos seuils (`lap_delta_s = 0.5`, `tyre_age_laps = 20`…) sont des règles écrites par un humain : c'est ce qui fait de notre router un système **à règles**. Dans un modèle d'apprentissage automatique, ces valeurs ne sont pas écrites : le modèle les **apprend à partir de données**. Les 8 milliards de *poids* de Llama sont exactement ça : des nombres ajustés automatiquement pendant l'entraînement. Le réglage manuel des seuils prévu en Phase 7 (rouler, observer, corriger) est une version artisanale de ce que fait l'entraînement.
+  - **Hyperparamètres.** Certains réglages ne sont pas appris mais choisis avant ou autour du modèle : taille du modèle, température de génération, nombre d'experts actifs (top-k) dans un MoE… Dans `config.py`, `OLLAMA_MODEL` et `WHISPER_MODEL` relèvent de ce type de choix.
+  - **Reproductibilité.** Versions figées dans `requirements.txt` + paramètres centralisés dans un seul fichier = on peut refaire exactement la même expérience plus tard. En IA, un résultat qu'on ne peut pas reproduire ne vaut presque rien.
+  - **Question de vérification :** Q3 dans `QUESTIONS_PEDAGOGIQUES.md`.
+- **Points ouverts :** aucun.
+- **Suite proposée :** étape 0.4 — `README.md` minimal (objectif, architecture, installation).
+- **Statut :** validé et commité.

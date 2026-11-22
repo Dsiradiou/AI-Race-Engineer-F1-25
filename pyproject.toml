@@ -1,0 +1,9 @@
+[project]
+name = "ai-race-engineer"
+version = "0.1.0"
+description = "Ingénieur de course IA temps réel pour F1 25 (télémétrie UDP, MoE applicatif, LLM local, voix)."
+requires-python = ">=3.11"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]

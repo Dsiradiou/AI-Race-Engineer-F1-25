@@ -1,0 +1,18 @@
+# Environnement Python
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+
+# Secrets (ne jamais commiter .env, seulement .env.example)
+.env
+
+# Logs de session (le dossier est gardé via .gitkeep)
+logs/*
+!logs/.gitkeep
+
+# Éditeurs / OS
+.vscode/
+.idea/
+Thumbs.db
+.DS_Store

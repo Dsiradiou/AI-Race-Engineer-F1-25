@@ -9,6 +9,8 @@ Elles sont ajoutées dans l'ordre chronologique, sous l'étape où elles ont ét
 |---|---|---|
 | Q1 | Discussion (avant 0.2) | MoE neuronal : mémoire vs paramètres actifs |
 | Q2 | 0.2 | Poids en RAM vs VRAM : vitesse de génération |
+| Q3 | 0.3 | Paramètres vs hyperparamètres |
+| Q4 | 0.3 | Paramètres et hyperparamètres d'un MoE |
 
 ---
 
@@ -81,3 +83,92 @@ En pratique, Ollama ne recopie pas les couches vers le GPU à chaque token : il 
 
 - **Vitesse maximale de génération ≈ débit mémoire ÷ taille du modèle.**
 - C'est pour ça que la **quantification** accélère autant : un modèle 2× plus petit = 2× moins d'octets à lire par token (à mesurer en Phase 5).
+
+---
+
+## Q3 — Paramètre ou hyperparamètre ?
+
+*Contexte : étape 0.3 — `config.py` et les seuils des experts (2026-11-22).*
+
+### Question
+
+Quelle est la différence entre un **paramètre** et un **hyperparamètre** d'un modèle ?
+Imaginons qu'on remplace un jour la règle « alerte si delta > 0,5 s » par un petit modèle entraîné sur nos sessions enregistrées pour détecter les pertes de temps : le seuil 0,5 s deviendrait-il un paramètre ou un hyperparamètre ? Et le nombre d'époques d'entraînement (le nombre de passes sur les données), lui ?
+
+### Ta réponse
+
+> Je ne connais pas la réponse, peux-tu me l'expliquer ?
+
+### Explication
+
+**Le test pour les distinguer :** est-ce que l'**entraînement** modifie cette valeur en regardant les données ?
+- **Oui → paramètre.** Le modèle l'apprend.
+- **Non, c'est moi qui la choisis avant l'entraînement → hyperparamètre.** Elle règle *comment* le modèle apprend ou *à quoi il ressemble*.
+
+**Réponse à la question :**
+- **Le seuil 0,5 s → deviendrait un paramètre.** On ne l'écrirait plus à la main : le modèle le trouverait à partir des données.
+- **Le nombre d'époques → hyperparamètre.** On le fixe avant l'entraînement ; l'entraînement ne le modifie pas.
+
+**Exemple concret avec nos sessions :**
+
+1. On enregistre 20 courses et on étiquette chaque tour : « perte de temps significative » (1) ou « normal » (0), avec son delta.
+2. On entraîne une **régression logistique** à une entrée : `probabilité_alerte = sigmoïde(w × delta + b)`.
+3. `w` et `b` démarrent au hasard. À chaque passe sur les données (une **époque**), l'algorithme compare ses prédictions aux étiquettes et ajuste `w` et `b` pour se tromper un peu moins.
+4. À la fin, l'alerte se déclenche quand `w × delta + b > 0`, c'est-à-dire quand `delta > −b / w`. Si l'entraînement donne `w = 10` et `b = −4,2`, le seuil appris est **0,42 s** : il vient des données, pas d'une intuition.
+
+Dans cet exemple :
+
+| Valeur | Type | Qui la fixe ? |
+|---|---|---|
+| `w`, `b` (donc le seuil 0,42 s) | **Paramètres** | L'entraînement, à partir des données |
+| Nombre d'époques (ex. 100) | Hyperparamètre | Moi, avant l'entraînement |
+| Taux d'apprentissage (taille de chaque correction de `w` et `b`) | Hyperparamètre | Moi |
+| Choix d'une régression logistique plutôt qu'un réseau de neurones | Hyperparamètre (architecture) | Moi |
+
+**Le même principe dans Llama 3.1 8B :**
+- **Paramètres :** les ~8 milliards de poids, tous appris pendant l'entraînement. C'est ce que contient le fichier de ~5 Go téléchargé par Ollama.
+- **Hyperparamètres d'architecture**, fixés par les chercheurs avant l'entraînement : 32 couches, vecteurs de taille 4096, 32 têtes d'attention, vocabulaire de ~128 000 tokens.
+- **Réglages d'inférence**, choisis par nous à l'utilisation : température, longueur maximale de la réponse. Ils ne changent pas le modèle, seulement la façon dont on s'en sert.
+
+**Comment choisit-on les hyperparamètres ?** Par essais : on entraîne avec plusieurs valeurs (50, 100, 200 époques…) et on garde celle qui donne les meilleurs résultats sur des données **mises de côté** (jeu de validation), jamais vues pendant l'entraînement. Trop peu d'époques : le modèle n'a pas assez appris (**sous-apprentissage**). Trop : il apprend par cœur les données d'entraînement et se trompe sur des courses nouvelles (**surapprentissage**).
+
+### À retenir
+
+- **Paramètre = appris à partir des données. Hyperparamètre = choisi par l'humain avant ou autour de l'apprentissage.**
+- Aujourd'hui, nos seuils sont réglés à la main : dans un modèle entraîné, ils deviendraient des paramètres.
+- Les hyperparamètres se choisissent en testant sur des données de validation.
+
+---
+
+## Q4 — Paramètres et hyperparamètres d'un MoE
+
+*Contexte : étape 0.3, question de vérification après l'explication de Q3 (2026-11-22).*
+
+### Question
+
+Dans Mixtral 8x7B, classe ces trois éléments en **paramètre** ou **hyperparamètre**, en appliquant le test de Q3 :
+1. le nombre d'experts activés par token (top-2) ;
+2. les poids du router (la petite couche qui décide vers quels experts envoyer chaque token) ;
+3. le nombre total d'experts (8).
+
+### Ta réponse
+
+> 1 hyperparamètre, 2 paramètre, 3 hyperparamètre.
+
+### Correction — tout juste ✅
+
+1. **Top-2 → hyperparamètre.** Les chercheurs ont choisi « 2 experts par token » avant l'entraînement ; l'entraînement ne le change jamais. C'est un compromis : plus de k = plus de calcul et (un peu) plus de qualité.
+2. **Poids du router → paramètres.** Le router est une petite couche linéaire (une matrice de taille 4096 × 8 par couche) dont les poids sont appris **en même temps** que les experts. C'est ce qui rend le MoE neuronal « intelligent » : personne n'écrit de règle, le router apprend tout seul quel expert est bon pour quel type de token.
+3. **8 experts → hyperparamètre (d'architecture).** Fixé avant l'entraînement, comme le nombre de couches.
+
+**Pour aller un cran plus loin — un troisième type de valeur :** le **choix** des experts pour un token donné (« *tyres* → experts 1 et 7 ») n'est ni un paramètre ni un hyperparamètre. C'est une **activation** : un résultat calculé à l'exécution, à partir des paramètres (poids du router) et de l'entrée (le token). Il change à chaque token et n'est stocké nulle part.
+
+**Comparaison avec notre MoE applicatif :** chez nous, le router n'a **aucun** paramètre appris : ses règles et ses seuils sont écrits à la main dans le code et dans `config.py`. C'est la différence fondamentale entre les deux approches.
+
+### À retenir
+
+| Type | Fixé par | Exemple Mixtral | Exemple dans notre projet |
+|---|---|---|---|
+| **Hyperparamètre** | L'humain, avant | top-2, 8 experts, 32 couches | modèle Ollama, cooldown 15 s |
+| **Paramètre** | L'entraînement | poids du router et des experts | *(aucun : tout est réglé à la main)* |
+| **Activation** | Le calcul, à chaque entrée | experts choisis pour « *tyres* » | experts activés pour un snapshot |
