@@ -13,6 +13,7 @@ Elles sont ajoutées dans l'ordre chronologique, sous l'étape où elles ont ét
 | Q4 | 0.3 | Paramètres et hyperparamètres d'un MoE |
 | Q5 | 0.4 | Entraînement vs inférence : coût mémoire |
 | Q6 | 1.1 | Décoder avec le mauvais schéma |
+| Q7 | 1.2 | Quand ne faut-il pas jeter de données ? |
 
 ---
 
@@ -275,3 +276,40 @@ L'en-tête dit **ce que le paquet prétend être** ; la taille vérifie **qu'il 
 - Mauvais schéma = valeurs fausses, souvent **sans erreur** : c'est pire qu'un plantage, car ça se propage jusqu'au pilote.
 - Valider avant de décoder : **format + ID** (en-tête) **et taille** (contenu).
 - Principe général en IA et en données : *garbage in, garbage out* — un modèle ne peut pas corriger des données d'entrée fausses ; il les transforme en réponses fausses mais convaincantes.
+
+---
+
+## Q7 — Quand ne faut-il pas jeter de données ?
+
+*Contexte : étape 1.2 — notre récepteur jette les paquets les plus anciens quand sa file est pleine (2026-11-22).*
+
+### Question
+
+Notre récepteur privilégie la **fraîcheur** : file pleine → on jette le paquet le plus ancien. C'est le bon choix pour l'ingénieur de course en direct.
+1. Dans notre projet, cite **une situation** où jeter des paquets serait au contraire une **mauvaise** idée.
+2. Parmi les types de paquets F1 25, lequel serait le plus gênant à perdre, et pourquoi ? (Indice : regarde la colonne « Fréquence » de `docs/SPEC_F1_25.md`.)
+
+### Ta réponse
+
+> Si on jetait des paquets concernant un moment du tour important, comme un lock-up ou un spin qui expliquerait notre temps. Ce serait le paquet Event.
+
+### Correction — point 2 juste ✅, point 1 à préciser
+
+**Point 2 — le paquet Event : exactement.** Regarde sa fréquence dans la spec : « *when the event occurs* ». Il est envoyé **une seule fois**, sans répétition. Si on le perd, l'information est perdue **pour toujours**. Exemples :
+- `FLBK` (*flashback*) : le temps de session **recule**. Sans cet événement, notre futur delta en Contre-la-montre comparerait des temps incohérents.
+- `PENA` (pénalité), `FTLP` (meilleur tour), `SEND` (fin de session) : impossible de les reconstituer autrement.
+Même chose pour **FinalClassification**, envoyé une seule fois en fin de course.
+
+**Point 1 — le lock-up : bonne intuition, mais un détail change tout.**
+- Le lock-up et le tête-à-queue ne sont **pas** des événements du paquet Event (la spec n'en a pas). On devra les **détecter nous-mêmes** dans les données continues : freinage fort + roue qui glisse (`m_wheelSlipRatio` du paquet MotionEx), ou vitesse de rotation anormale.
+- Or ces données continues sont **redondantes dans le temps** : à 20 Hz, un lock-up qui dure ~0,5 s est décrit par ~10 paquets consécutifs. En perdre 1 ou 2 ne fait pas disparaître le lock-up ; on le voit encore sur les autres. C'est pour ça que jeter des paquets CarTelemetry de temps en temps est acceptable en direct.
+
+**La vraie situation où il ne faut rien jeter : l'enregistrement.** `tools/record_session.py` (étape 1.6) doit garder **tous** les paquets : la validation 1.8 exige un rejeu **identique** à la session réelle, et la trace du meilleur tour (Contre-la-montre) doit être complète. En direct on privilégie la fraîcheur ; à l'enregistrement, l'exhaustivité.
+
+**Conséquence pour notre code :** on notera que les paquets **Event** (et FinalClassification) ne devront jamais être jetés, même file pleine.
+
+### À retenir
+
+- **Données discrètes** (un événement, envoyé une fois) : perdues = perdues. À protéger.
+- **Données continues échantillonnées** (télémétrie à 20 Hz) : redondantes, une perte ponctuelle est tolérable… tant que le phénomène dure plus longtemps que l'intervalle entre deux mesures (50 ms à 20 Hz). Un événement plus bref que ça peut passer entre deux échantillons, même sans aucune perte : c'est une limite de l'**échantillonnage**, pas de la file.
+- Temps réel → **fraîcheur** ; enregistrement / données d'entraînement → **exhaustivité**.

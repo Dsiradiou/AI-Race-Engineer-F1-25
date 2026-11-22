@@ -106,3 +106,26 @@ y sont expliqués avec des exemples concrets tirés du projet.
   - Synthèse rédigée pour le projet : `docs/SPEC_F1_25.md` (versionnée). Les documents EA (`docs/specs/`) sont exclus de Git (`.gitignore`), car © EA.
   - `pypdf` installé dans le venv pour lire les PDF (outil ponctuel, non ajouté à `requirements.txt`).
 - **Statut :** validé et commité.
+
+### Étape 1.2 — Récepteur UDP, validation de l'en-tête et sonde (2026-11-22)
+
+- **Fait :**
+  - `telemetry/packet_parser.py` : constantes de la spec (format 2025, en-tête `<HBBBBBQfIIBB` = 29 octets, `PacketId`, tailles des 16 paquets), `parse_header()` et `validate_packet()` — les deux contrôles de Q6 : **format + type** (en-tête) puis **taille exacte** (contenu). Tout paquet non conforme lève `PacketValidationError`.
+  - `telemetry/udp_receiver.py` : `UdpReceiver` asynchrone (`asyncio`) qui place les datagrammes bruts dans une file ; si la file est pleine, **le plus ancien est jeté** (compteurs `received` / `dropped`).
+  - `tools/udp_probe.py` : sonde en ligne de commande (`python -m tools.udp_probe --duration 30`) qui compte les paquets par (format, type), relève leurs tailles et leur fréquence, et liste les rejets avec leur raison.
+  - `tests/conftest.py` : fabrique de faux paquets (`build_packet`) pour tester sans le jeu.
+- **Tests :** `pytest` → **32 passed** : en-tête décodé champ par champ, les 16 types acceptés à leur taille exacte, rejet du format 2026, de l'ID 16, des tailles fausses (dont l'ancienne taille CarDamage 953) ; réception réelle de datagrammes en local ; politique « jeter le plus ancien ». **Test de bout en bout** : sonde lancée en ligne de commande + 62 faux paquets envoyés → 60 valides, 2 rejets corrects (« format 2026 non supporté », « CAR_DAMAGE : 953 octets reçus, 1041 attendus »).
+- **Concepts IA :**
+  - **Flux temps réel vs lot (*streaming* vs *batch*).** En *batch*, on a toutes les données avant de calculer (ex. entraîner un modèle sur 20 courses enregistrées). En *streaming*, les données arrivent en continu et on décide au fil de l'eau : c'est notre cas — environ 20 paquets par seconde **et par type**, soit plus de 100 paquets/s au total.
+  - **Producteur, consommateur et file d'attente.** Le jeu produit à un rythme qu'on ne contrôle pas ; notre analyse consomme à son propre rythme. La file absorbe les à-coups. Si le consommateur est trop lent (plus tard : le LLM, qui met parfois plus d'une seconde à répondre), la file se remplit : il faut une **politique de débordement** (*backpressure*). Nous gardons les données **les plus fraîches** : un ingénieur de course doit parler de la situation **actuelle**, pas d'il y a 3 secondes.
+  - **Valider à l'ingestion** : application directe de Q6 — chaque paquet est contrôlé dès son arrivée, avant d'atteindre les experts et le LLM.
+  - **Question de vérification :** Q7 dans `QUESTIONS_PEDAGOGIQUES.md`.
+- **Points ouverts :** les paquets **Event** et **FinalClassification** (envoyés une seule fois) ne devront jamais être jetés par la file (conclusion de Q7, à intégrer quand on branchera l'analyse, étape 1.4 au plus tard) ; l'enregistreur (1.6) ne devra rien jeter. **Test avec le vrai jeu** à faire par le pilote du projet (voir ci-dessous) → il confirmera la vérité terrain (format, tailles et fréquences réels). Les accents peuvent s'afficher mal si la sortie de la sonde est redirigée vers un fichier ; en console, pas de problème.
+- **Suite proposée :** étape 1.3 — décodage du contenu des paquets utiles (LapData, CarTelemetry, CarStatus, CarDamage, Session, TimeTrial) + tests.
+- **Test en jeu (Contre-la-montre, 120 s) — vérité terrain :**
+  - **12 580 paquets reçus, 12 580 valides, 0 jeté** ; format 2025, année 25, jeu en version 1.27, voiture joueur n°0.
+  - **Les 14 types reçus ont exactement la taille de la spec.** Absents (normal en Contre-la-montre) : FinalClassification (8) et LobbyInfo (9). Le paquet **TimeTrial (14) est bien présent**.
+  - **Fréquences cohérentes avec la spec** une fois rapportées au temps où chaque paquet circulait : 1 514 paquets « au rythme du menu » à 20 Hz ≈ 76 s de roulage ; Session (202 à 2/s) et TimeTrial (102 à 1/s) ≈ 100 s de session. La colonne `/s` de la première version de la sonde divisait par toute la durée d'écoute (120 s, menus compris) → **corrigée** : la sonde affiche maintenant, par type, la fenêtre active (`actif(s)`) et la fréquence mesurée sur cette fenêtre (+ 1 test, **33 passed**).
+  - **Event : ~3 par seconde**, bien plus que prévu pour des « événements rares ». Probablement des événements `BUTN` (état des boutons, envoyés à chaque appui) : à vérifier et à filtrer à l'étape 1.3.
+  - **Volume de données** : à 20 Hz, ≈ 160 Ko/s, soit **≈ 575 Mo par heure** de paquets bruts → à prendre en compte pour l'enregistreur (1.6) : ne garder que les types utiles et/ou compresser.
+- **Statut :** validé et commité.
