@@ -14,6 +14,7 @@ Elles sont ajoutées dans l'ordre chronologique, sous l'étape où elles ont ét
 | Q5 | 0.4 | Entraînement vs inférence : coût mémoire |
 | Q6 | 1.1 | Décoder avec le mauvais schéma |
 | Q7 | 1.2 | Quand ne faut-il pas jeter de données ? |
+| Q8 | 1.3 | Quantification : des forces G aux LLM |
 
 ---
 
@@ -313,3 +314,64 @@ Même chose pour **FinalClassification**, envoyé une seule fois en fin de cours
 - **Données discrètes** (un événement, envoyé une fois) : perdues = perdues. À protéger.
 - **Données continues échantillonnées** (télémétrie à 20 Hz) : redondantes, une perte ponctuelle est tolérable… tant que le phénomène dure plus longtemps que l'intervalle entre deux mesures (50 ms à 20 Hz). Un événement plus bref que ça peut passer entre deux échantillons, même sans aucune perte : c'est une limite de l'**échantillonnage**, pas de la file.
 - Temps réel → **fraîcheur** ; enregistrement / données d'entraînement → **exhaustivité**.
+
+---
+
+## Q8 — Quantification : des forces G aux LLM
+
+*Contexte : étape 1.3 — en comparant les specs, on a vu que le format 2026 change le type des forces G (2026-11-22).*
+
+### Question
+
+Dans le format 2025, les forces G sont des `float` (4 octets). Dans le format 2026, ce sont des `int16` (2 octets) « quantifiés » : le jeu envoie `round(g × 1000)` et on retrouve la valeur en divisant par 1000.
+
+1. Le jeu mesure une force latérale de **3,14159 g**. Quelle valeur reçoit-on après quantification ? Quelle est la plus petite différence de force G qu'on peut encore distinguer ?
+2. Un `int16` va de −32 768 à 32 767. Quelle est la force G maximale représentable ? Est-ce suffisant pour une F1 (environ 5 à 6 g en virage, parfois 50 g ou plus lors d'un gros choc) ?
+3. Quel est le lien avec Llama 3.1 8B « en Q4 » qu'on utilisera en Phase 5 ?
+
+### Ta réponse
+
+> 1. On reçoit 3141. 2. En float 9999, et c'est largement suffisant. 3. Je ne sais pas.
+
+### Correction — 1 presque juste, 2 à revoir, 3 expliqué
+
+**1. Presque : 3142, pas 3141.** 3,14159 × 1000 = 3141,59, et `round` arrondit au **plus proche** → **3142**. (3141 serait une *troncature*, qui coupe les décimales.) À la lecture : 3142 / 1000 = **3,142 g**.
+La plus petite différence visible est **0,001 g** : c'est le **pas** de quantification. 3,1415 g et 3,1419 g deviennent tous deux 3142 : la différence est perdue. L'erreur maximale est d'un demi-pas, ±0,0005 g.
+
+**2. À revoir : le maximum est 32,767 g.** Le type de stockage est `int16`, pas `float` : la plus grande valeur envoyée est 32 767, donc la plus grande force représentable est 32 767 / 1000 = **32,767 g** (et −32,768 g de l'autre côté).
+- En virage (5 à 6 g) : **largement suffisant**, tu as raison sur ce point.
+- Lors d'un gros choc (50 g ou plus) : **la valeur sature** et reste bloquée à 32,767 g. On saura qu'il y a eu un choc violent, mais pas sa force exacte.
+
+C'est le compromis central de la quantification : avec un nombre fixe de valeurs possibles (65 536 pour un `int16`), le **facteur d'échelle** répartit ces valeurs entre **étendue** et **précision**.
+
+| Facteur d'échelle | Pas (précision) | Plage représentable |
+|---|---|---|
+| × 1000 (choix d'EA) | 0,001 g | ±32,7 g |
+| × 100 | 0,01 g | ±327 g |
+| × 10 000 | 0,0001 g | ±3,3 g → sature déjà en virage ❌ |
+
+**3. Le lien avec Llama 3.1 8B en Q4 : c'est exactement le même principe, poussé beaucoup plus loin.**
+
+Les 8 milliards de poids de Llama sont des nombres à virgule, stockés à l'origine sur 16 bits (2 octets) → **16 Go**. Quantifier en **Q4**, c'est stocker chaque poids comme un **entier sur 4 bits**, soit seulement **16 valeurs possibles** (de −8 à 7), plus un **facteur d'échelle** :
+
+> poids ≈ entier × facteur d'échelle
+
+Exemple avec un bloc de 4 poids :
+- Poids d'origine : `0,12 ; −0,03 ; 0,07 ; −0,11`
+- Plus grande valeur absolue = 0,12 → facteur d'échelle = 0,12 / 7 ≈ 0,0171
+- Entiers stockés (4 bits chacun) : `round(poids / 0,0171)` = `7 ; −2 ; 4 ; −6`
+- Poids reconstruits : `0,120 ; −0,034 ; 0,069 ; −0,103` → proches des originaux, mais pas identiques.
+
+**L'astuce qui rend ça possible :** au lieu d'un seul facteur d'échelle pour tout le modèle (comme le × 1000 unique d'EA), chaque **petit bloc** de poids (par exemple 32) a **son propre** facteur, adapté à sa plage de valeurs. On règle ainsi le compromis étendue / précision bloc par bloc. En comptant ces facteurs, on arrive à environ 4,5 bits par poids en moyenne.
+
+**Ce qu'on y gagne :**
+- **Mémoire** : ~16 Go → **~5 Go**. C'est ce qui permet de faire tenir Llama 8B dans tes 8 Go de VRAM à côté du jeu.
+- **Vitesse** : la génération étant limitée par la lecture mémoire (Q2), 3 fois moins d'octets à lire par token = génération nettement plus rapide.
+
+**Ce qu'on y perd :** un peu de précision sur chaque poids, donc une légère baisse de qualité. Les réseaux de neurones supportent bien ce « bruit » : une erreur sur un poids isolé compte peu, parce que chaque résultat est une somme de milliers de produits et que les petites erreurs se compensent en partie. En dessous de 4 bits, la qualité se dégrade en revanche nettement.
+
+### À retenir
+
+- Quantifier = remplacer un nombre à virgule par **un entier + un facteur d'échelle**.
+- Le facteur d'échelle fixe le compromis : **pas fin = petite plage**, **grande plage = pas grossier**. Hors de la plage, la valeur **sature**.
+- Les LLM appliquent la même idée avec des **facteurs par bloc** : Q4 = 16 valeurs par poids, ~3× moins de mémoire que 16 bits, génération plus rapide, petite perte de qualité.

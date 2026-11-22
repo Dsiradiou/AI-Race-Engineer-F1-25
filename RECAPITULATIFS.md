@@ -129,3 +129,31 @@ y sont expliqués avec des exemples concrets tirés du projet.
   - **Event : ~3 par seconde**, bien plus que prévu pour des « événements rares ». Probablement des événements `BUTN` (état des boutons, envoyés à chaque appui) : à vérifier et à filtrer à l'étape 1.3.
   - **Volume de données** : à 20 Hz, ≈ 160 Ko/s, soit **≈ 575 Mo par heure** de paquets bruts → à prendre en compte pour l'enregistreur (1.6) : ne garder que les types utiles et/ou compresser.
 - **Statut :** validé et commité.
+
+### Étape 1.3 — Décodage du contenu des paquets (2026-11-22)
+
+- **Fait :**
+  - `telemetry/packets.py` : les structures de la spec, chacune décrite par une `dataclass` (noms, types, unités) **et** une `Layout` (liste ordonnée des champs et de leur format `struct`). `Layout` refuse au chargement toute différence de noms entre les deux. Structures décodées : **LapData, CarTelemetry, CarStatus, CarDamage** (22 voitures chacune), **Session** (avec zones de commissaires et prévisions météo), **Event** (code + détails selon le code : FTLP, FLBK, PENA, BUTN…), **MotionEx** (glissement des roues, pour détecter les blocages) et **TimeTrial** (meilleur tour session / record perso / rival).
+  - `telemetry/packet_parser.py` : `parse_packet(data)` = validation (étape 1.2) puis décodage ; renvoie `None` pour les types valides mais inutiles au projet (Motion, Participants, SessionHistory…). Raccourci `.player` pour la voiture du joueur ; propriétés pratiques (`sector1_time_ms`, `delta_to_race_leader_ms`, `is_time_trial`, `is_race`).
+  - `tools/udp_probe.py` : nouvelle option `--save-samples` (enregistre un vrai paquet par type et par code d'événement, **jamais** Participants/LobbyInfo qui contiennent des noms de joueurs) + comptage des codes d'événements.
+  - Écart à la structure du cadrage : les structures sont dans un module à part, `telemetry/packets.py`, pour garder `packet_parser.py` lisible.
+- **Tests :** **86 passed** (dont 23 sur données réelles). Trois niveaux de vérification :
+  1. **Tailles** : chaque structure × 22 voitures + champs finaux = taille exacte de la spec, pour les 8 types.
+  2. **Test indépendant** : un paquet LapData écrit octet par octet avec un format recopié de la spec (voiture du joueur en position 5) → chaque champ décodé correctement.
+  3. **Allers-retours** : pour chaque type, 22 voitures aux valeurs toutes différentes → encodées puis décodées à l'identique (vérifie qu'aucun champ n'est décalé ni inversé).
+- **Concepts IA :**
+  - **Des octets aux *features*.** Un modèle d'IA ne travaille jamais sur des données brutes : il lui faut des valeurs nommées, typées et dans une unité connue — des **caractéristiques** (*features*). Cette étape est exactement ça : 1 352 octets anonymes deviennent `speed = 287 km/h`, `brake = 0.85`, `tyres_wear = (12.5, 13.1, 9.8, 10.2) %`. C'est la première brique de tout pipeline d'IA, souvent la plus longue, et celle où se cachent la plupart des bugs.
+  - **Types et précision.** La spec choisit pour chaque valeur un type au plus juste : une température de pneu tient dans un `uint8` (0-255 °C, 1 octet), une vitesse dans un `uint16`, une usure en `float` (4 octets). C'est un compromis taille / précision… le même que la **quantification** des LLM (voir Q8).
+  - **Vérifier la plausibilité.** Un test unitaire vérifie que le code fait ce qu'on croit ; seule la confrontation à de **vraies** données vérifie que ce qu'on croit est juste. D'où les tests sur échantillons réels : un décalage d'un seul octet donne presque toujours des valeurs absurdes (une vitesse de 40 000 km/h).
+  - **Question de vérification :** Q8 dans `QUESTIONS_PEDAGOGIQUES.md`.
+- **Validation sur données réelles** (Contre-la-montre, Lusail, capture de 200 s, 16 échantillons dans `tests/fixtures/samples/`) : **23 tests de plausibilité passés**, et les valeurs décodées se recoupent entre paquets différents :
+  - Session : type 18 (Contre-la-montre), `track_id` 32 = **Losail** d'après l'annexe, 5 417 m (le vrai circuit fait 5,419 km), `game_mode` 5, `rule_set` 2.
+  - Vitesse : 319 km/h dans CarTelemetry **et** 319 km/h dans MotionEx (vitesse locale, calculée par le moteur physique, dans un autre paquet) ; 8e rapport, 11 340 tr/min, plein gaz, DRS ouvert.
+  - Ordre des roues confirmé : pressions à chaud RL/RR 20,9 et FL/FR 30,1 PSI, contre 20,5 / 29,5 PSI à froid dans le paquet CarSetups (où chaque roue est nommée explicitement).
+  - TimeTrial : la somme des trois secteurs redonne le temps au tour à 1 ms près pour les trois tours de référence (session 1:26.727, record perso 1:26.148, rival 1:25.695).
+  - Cohérence pénalité / tour invalide : événement PENA type 13 (« ce tour et le suivant invalidés »), infraction 26 (« sortie de piste ») au tour 2 → LapData indique bien le tour 3 **invalide**, et le meilleur tour de la session est marqué invalide.
+  - Carburant 10 / 110 kg, pneus C3 (affichés « tendres »), ERS plein (4,0 MJ, mode hotlap), usure 0 % : cohérent avec le Contre-la-montre.
+  - **Mystère des ~3 événements par seconde résolu** : `BUTN` avec `button_status = 0x1000` = « R2 ou RT », la gâchette d'accélérateur. Chaque appui ou relâchement génère un événement → bruit à filtrer pour l'analyse.
+- **Points ouverts :** filtrer les événements `BUTN` (bruit) lors de l'étape 1.4.
+- **Suite proposée :** étape 1.4 — `TelemetrySnapshot` : l'état courant de la course, mis à jour par les paquets décodés (+ protection des paquets Event dans la file, cf. Q7).
+- **Statut :** validé et commité.

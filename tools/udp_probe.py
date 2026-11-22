@@ -5,6 +5,12 @@ relève leurs tailles et indique s'ils passent la validation de la spec F1 25.
 
 Lancement (jeu en piste) :
     python -m tools.udp_probe --duration 30
+    python -m tools.udp_probe --duration 60 --save-samples tests/fixtures/samples
+
+Avec `--save-samples`, le dernier paquet valide de chaque type (et de chaque code
+d'événement) est enregistré tel quel dans un fichier `.bin`, pour servir de données
+réelles dans les tests. Les paquets contenant des noms de joueurs (Participants,
+LobbyInfo) ne sont jamais enregistrés.
 """
 
 from __future__ import annotations
@@ -14,10 +20,21 @@ import asyncio
 import contextlib
 import time
 from collections import Counter, defaultdict
+from pathlib import Path
 
 from config import settings
-from telemetry.packet_parser import PACKET_SIZES, PacketId, PacketValidationError, parse_header, validate_packet
+from telemetry.packet_parser import (
+    HEADER_SIZE,
+    PACKET_SIZES,
+    PacketId,
+    PacketValidationError,
+    parse_header,
+    validate_packet,
+)
 from telemetry.udp_receiver import UdpReceiver
+
+PRIVATE_PACKETS = frozenset({PacketId.PARTICIPANTS, PacketId.LOBBY_INFO})
+"""Paquets contenant des noms de joueurs : jamais enregistrés."""
 
 
 class ProbeStats:
@@ -31,6 +48,9 @@ class ProbeStats:
         self.last_seen: dict[tuple[int, int], float] = {}
         self.valid = 0
         self.first_header = None
+        self.event_codes: Counter[str] = Counter()
+        self.samples: dict[str, bytes] = {}
+        """Dernier paquet valide par type (et par code d'événement), prêt à être enregistré."""
 
     def add(self, data: bytes, now: float | None = None) -> None:
         """Enregistre un paquet brut reçu à l'instant `now` (horloge monotone, en secondes)."""
@@ -48,10 +68,18 @@ class ProbeStats:
         self.first_seen.setdefault(key, now)
         self.last_seen[key] = now
         try:
-            validate_packet(data)
-            self.valid += 1
+            _, packet_id = validate_packet(data)
         except PacketValidationError as exc:
             self.rejections[str(exc)] += 1
+            return
+        self.valid += 1
+        name = f"{packet_id.value:02d}_{packet_id.name}"
+        if packet_id is PacketId.EVENT:
+            code = data[HEADER_SIZE : HEADER_SIZE + 4].decode("ascii", errors="replace")
+            self.event_codes[code] += 1
+            name += f"_{code}"
+        if packet_id not in PRIVATE_PACKETS:
+            self.samples[name] = data
 
     def report(self, elapsed: float) -> str:
         """Tableau récapitulatif lisible en console.
@@ -78,10 +106,23 @@ class ProbeStats:
             lines.append(
                 f"{fmt:>6} {pid:>3} {name:<21} {n:>6} {active:>9.1f} {rate:>6.1f} {sizes:>12} {expected or '-':>8}"
             )
+        if self.event_codes:
+            codes = ", ".join(f"{code} × {n}" for code, n in self.event_codes.most_common())
+            lines.append(f"Codes d'événements : {codes}")
         if self.rejections:
             lines.append("Rejets :")
             lines.extend(f"  {n:>6} × {reason}" for reason, n in self.rejections.most_common())
         return "\n".join(lines)
+
+    def save_samples(self, directory: Path) -> list[Path]:
+        """Écrit un fichier `.bin` par échantillon et renvoie les chemins créés."""
+        directory.mkdir(parents=True, exist_ok=True)
+        paths = []
+        for name, data in sorted(self.samples.items()):
+            path = directory / f"{name}.bin"
+            path.write_bytes(data)
+            paths.append(path)
+        return paths
 
 
 async def run_probe(host: str, port: int, duration: float) -> ProbeStats:
@@ -108,9 +149,13 @@ def main() -> None:
     parser.add_argument("--host", default=settings.udp_host)
     parser.add_argument("--port", type=int, default=settings.udp_port)
     parser.add_argument("--duration", type=float, default=30.0, help="durée d'écoute en secondes")
+    parser.add_argument("--save-samples", type=Path, help="dossier où enregistrer un paquet réel par type")
     args = parser.parse_args()
     stats = asyncio.run(run_probe(args.host, args.port, args.duration))
     print(stats.report(args.duration))
+    if args.save_samples:
+        paths = stats.save_samples(args.save_samples)
+        print(f"{len(paths)} échantillons enregistrés dans {args.save_samples}")
 
 
 if __name__ == "__main__":

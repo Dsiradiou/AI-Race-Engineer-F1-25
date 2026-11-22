@@ -54,6 +54,19 @@ def test_probe_stats_counts_and_rejects(make_packet) -> None:
     assert "CAR_TELEMETRY" in stats.report(elapsed=1.0)
 
 
+def test_probe_saves_samples_but_not_private_packets(make_packet, tmp_path) -> None:
+    stats = ProbeStats()
+    stats.add(make_packet(PacketId.CAR_TELEMETRY))
+    stats.add(make_packet(PacketId.PARTICIPANTS))  # contient des noms de joueurs
+    event = bytearray(make_packet(PacketId.EVENT))
+    event[29:33] = b"BUTN"
+    stats.add(bytes(event))
+    names = sorted(path.name for path in stats.save_samples(tmp_path))
+    assert names == ["03_EVENT_BUTN.bin", "06_CAR_TELEMETRY.bin"]
+    assert stats.event_codes["BUTN"] == 1
+    assert "BUTN × 1" in stats.report(elapsed=1.0)
+
+
 def test_probe_rate_uses_active_window(make_packet) -> None:
     """20 paquets à 20 Hz reçus pendant une écoute de 120 s : la fréquence doit valoir 20/s, pas 20/120."""
     stats = ProbeStats()
