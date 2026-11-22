@@ -157,3 +157,21 @@ y sont expliqués avec des exemples concrets tirés du projet.
 - **Points ouverts :** filtrer les événements `BUTN` (bruit) lors de l'étape 1.4.
 - **Suite proposée :** étape 1.4 — `TelemetrySnapshot` : l'état courant de la course, mis à jour par les paquets décodés (+ protection des paquets Event dans la file, cf. Q7).
 - **Statut :** validé et commité.
+
+### Étape 1.4 — TelemetrySnapshot : l'état courant de la session (2026-11-22)
+
+- **Fait :**
+  - `telemetry/snapshot.py` : `TelemetrySnapshot.update(packet)` intègre chaque paquet décodé et garde la **dernière valeur connue** de chaque information : session, tour, télémétrie, état, dégâts et physique (MotionEx) de la voiture du joueur, données de tour des 22 voitures, et les 50 derniers événements.
+  - **Événements filtrés** : les `BUTN` (gâchette d'accélérateur, ~3/s) sont ignorés ; les autres (pénalités, flashbacks, meilleurs tours…) sont gardés avec leur horodatage.
+  - **Changement de session** (nouveau `session_uid`) → l'état est remis à zéro, pour ne jamais mélanger deux sessions.
+  - **Écarts** : `gap_ahead_ms` (fourni par le jeu) et `gap_behind_ms`. Le jeu ne donne que l'écart avec la voiture de **devant** : l'écart avec celle de derrière se lit donc chez la voiture classée juste derrière nous.
+  - Propriétés de lecture pour les experts : `is_ready`, `is_time_trial`, `is_race`, `car_at_position()`.
+  - `telemetry/udp_receiver.py` : conclusion de Q7 appliquée — quand la file est pleine, on jette le plus ancien paquet **non protégé** : les paquets Event et FinalClassification ne sont jamais jetés. Le type est lu sur un seul octet de l'en-tête, sans décoder le paquet.
+- **Tests :** **96 passed**. Snapshot rempli à partir des vrais échantillons (Losail, 319 km/h, pneus tendres, événements PENA et SPTP gardés, BUTN filtré) ; mise à jour avec la dernière valeur ; index du joueur ; réinitialisation au changement de session ; historique d'événements borné ; écarts devant / derrière (milieu de peloton, leader, dernier, écart de plus d'une minute) ; protection des événements dans la file.
+- **Concepts IA :**
+  - **Fusionner des flux à rythmes différents.** La télémétrie arrive 20 fois par seconde, la session 2 fois, les événements de façon imprévisible. Le snapshot les fusionne en un **état unique et cohérent**, en gardant la dernière valeur de chacun (*sample and hold*). C'est un problème classique des systèmes temps réel (et de la robotique, où l'on fusionne caméra, GPS et capteurs).
+  - **Le snapshot sera l'entrée du LLM.** Un LLM n'a aucun accès au jeu et aucune mémoire entre deux appels : il ne sait **que ce qu'on écrit dans son prompt**. En Phase 5, à chaque message radio, une version texte de ce snapshot sera injectée dans le prompt. Ce que le snapshot contient — et ce qu'il omet — fixe donc ce que l'ingénieur IA peut savoir.
+  - **Question de vérification :** Q9 dans `QUESTIONS_PEDAGOGIQUES.md`.
+- **Points ouverts :** les données propres au Contre-la-montre (paquet TimeTrial, voitures « record perso » et « rival ») seront ajoutées à l'étape 1.4b.
+- **Suite proposée :** étape 1.4b — données du Contre-la-montre dans le snapshot.
+- **Statut :** validé et commité.

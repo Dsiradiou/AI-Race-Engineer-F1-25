@@ -34,7 +34,7 @@ tirés du projet lors des bilans (section « Concepts IA » de `RECAPITULATIFS.m
 - [x] 1.1 Vérifier la spec officielle des paquets UDP F1 25 (en-tête, IDs de paquets, tailles, paquet Session et paquet TimeTrial)
 - [x] 1.2 `telemetry/udp_receiver.py` — réception des paquets UDP (port 20777)
 - [x] 1.3 `telemetry/packet_parser.py` — décodage binaire (`struct`) des paquets utiles + tests
-- [~] 1.4 `telemetry/snapshot.py` — `TelemetrySnapshot` (état courant de la course)
+- [x] 1.4 `telemetry/snapshot.py` — `TelemetrySnapshot` (état courant de la course)
 - [ ] 1.4b ⏱️ Type de session (paquet Session) dans le snapshot + données du paquet TimeTrial (meilleur tour perso, rival) si présent dans le format 2025
 - [ ] 1.5 Affichage console en temps réel (vitesse, tour, secteur, pneus, gap)
 - [ ] 1.6 `tools/record_session.py` — enregistrement des paquets bruts

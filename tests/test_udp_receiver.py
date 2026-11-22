@@ -42,6 +42,22 @@ def test_drops_oldest_when_queue_full() -> None:
     assert kept == [bytes([3]), bytes([4])]
 
 
+def test_never_drops_event_packets(make_packet) -> None:
+    """File pleine : on jette la télémétrie la plus ancienne, jamais un événement (Q7)."""
+    async def scenario() -> tuple[UdpReceiver, list[bytes]]:
+        receiver = UdpReceiver("127.0.0.1", 0, queue_size=3)
+        event = make_packet(PacketId.EVENT)
+        receiver._push(event)  # le plus ancien… mais protégé
+        for _ in range(4):
+            receiver._push(make_packet(PacketId.CAR_TELEMETRY))
+        return receiver, [await receiver.receive() for _ in range(3)]
+
+    receiver, kept = asyncio.run(scenario())
+    assert receiver.dropped == 2
+    assert validate_packet(kept[0])[1] is PacketId.EVENT
+    assert all(validate_packet(k)[1] is PacketId.CAR_TELEMETRY for k in kept[1:])
+
+
 def test_probe_stats_counts_and_rejects(make_packet) -> None:
     stats = ProbeStats()
     stats.add(make_packet(PacketId.CAR_TELEMETRY))

@@ -15,6 +15,7 @@ Elles sont ajoutées dans l'ordre chronologique, sous l'étape où elles ont ét
 | Q6 | 1.1 | Décoder avec le mauvais schéma |
 | Q7 | 1.2 | Quand ne faut-il pas jeter de données ? |
 | Q8 | 1.3 | Quantification : des forces G aux LLM |
+| Q9 | 1.4 | Ce que le LLM sait (et ne sait pas) |
 
 ---
 
@@ -375,3 +376,48 @@ Exemple avec un bloc de 4 poids :
 - Quantifier = remplacer un nombre à virgule par **un entier + un facteur d'échelle**.
 - Le facteur d'échelle fixe le compromis : **pas fin = petite plage**, **grande plage = pas grossier**. Hors de la plage, la valeur **sature**.
 - Les LLM appliquent la même idée avec des **facteurs par bloc** : Q4 = 16 valeurs par poids, ~3× moins de mémoire que 16 bits, génération plus rapide, petite perte de qualité.
+
+---
+
+## Q9 — Ce que le LLM sait (et ne sait pas)
+
+*Contexte : étape 1.4 — le snapshot deviendra, sous forme de texte, l'entrée du LLM en Phase 5 (2026-11-22).*
+
+### Question
+
+Le LLM ne « voit » pas le jeu. À chaque question du pilote, on lui enverra le snapshot sous forme de texte dans son prompt.
+1. Imaginons qu'un bug fasse partir le prompt **sans** le snapshot. Le pilote demande « *How are my tyres?* ». Que risque de répondre le LLM ? Pourquoi est-ce dangereux ?
+2. Pourquoi ne pas simplement envoyer au LLM **tout l'historique** des paquets depuis le début de la course, pour qu'il ait toutes les informations ? Donne au moins deux raisons.
+
+### Ta réponse
+
+> 1. Il pourrait lire un état qui n'est plus pertinent, ce qui fausserait sa réponse.
+> 2. Le temps de traitement, car le volume est massif ; et certaines données évoluent constamment, comme l'état des pneus : ce serait envoyer des données obsolètes.
+
+### Correction — 1 à corriger, 2 juste et à compléter
+
+**1. Sans snapshot, le LLM ne lit pas un état ancien : il n'a aucun état du tout.**
+Un LLM n'a **aucune mémoire** entre deux appels et aucun accès au jeu. Sans snapshot dans le prompt, il ne sait littéralement rien de ta voiture. Pourtant, il répondra quand même, parce qu'il est entraîné à produire **la suite de texte la plus probable**, pas à vérifier des faits. Il risque donc d'**inventer** une réponse plausible :
+
+> « *Tyres are looking good, fronts at around 40 percent wear, you can push.* »
+
+C'est une **hallucination** : un texte fluide, sûr de lui, crédible… et sans aucun fondement. Le danger : le ton est le même que pour une vraie information, donc le pilote n'a aucun moyen de faire la différence, et il agit dessus (il attaque avec des pneus peut-être morts).
+
+**Ce que tu décris existe aussi, mais c'est un autre bug :** un snapshot **figé** (plus mis à jour, par exemple si la réception UDP s'arrête) donnerait des réponses fondées sur des données périmées. Les deux protections, qu'on mettra en place en Phase 5 :
+- vérifier **avant** d'appeler le LLM que le snapshot existe et qu'il est **récent** (horodatage du dernier paquet) ;
+- écrire dans le *system prompt* : « si une information n'est pas dans les données, dis que tu ne sais pas ».
+
+**2. Juste : le temps de traitement et les données obsolètes sont deux vraies raisons.** Précisons-les et ajoutons-en deux :
+
+- **Le temps (ta raison 1).** Avant de générer le premier mot, le LLM doit lire tout le prompt (le *prefill*). Plus le prompt est long, plus la première syllabe arrive tard. Pour une radio en temps réel, chaque seconde compte.
+- **Les données obsolètes (ta raison 2).** Excellente remarque : avec tout l'historique, le prompt contiendrait des centaines de valeurs d'usure différentes. Le modèle devrait deviner laquelle est la bonne, et il peut se tromper. Plus le prompt est long et répétitif, plus l'information utile est **diluée**.
+- **La fenêtre de contexte (limite dure).** Un LLM ne peut lire qu'un nombre maximal de *tokens* (morceaux de mots) : 128 000 pour Llama 3.1, et souvent bien moins dans la configuration par défaut d'Ollama (à vérifier en Phase 5). Or le jeu produit ~160 Ko de données **par seconde**. Converties en texte, quelques secondes d'historique suffiraient à remplir toute la fenêtre.
+- **La mémoire.** Pendant la lecture du prompt, le modèle garde en VRAM des résultats intermédiaires pour chaque token (le *KV cache*). Un prompt énorme ferait déborder les 8 Go de VRAM… qu'on partage déjà avec le jeu.
+
+D'où notre approche : un snapshot **court et à jour** (quelques centaines de tokens), et non l'historique brut. Le tri de l'information se fait **avant** le LLM : c'est justement le rôle du router et des experts de la Phase 2.
+
+### À retenir
+
+- Un LLM ne sait **que ce qu'il y a dans son prompt**. Sans données, il n'avoue pas son ignorance : il **hallucine** une réponse plausible.
+- Données manquantes → hallucination ; données figées → réponses périmées. Deux bugs différents, deux protections différentes.
+- Le prompt doit être **court, à jour et déjà trié** : temps de réponse, fenêtre de contexte, mémoire (KV cache) et dilution de l'information.
